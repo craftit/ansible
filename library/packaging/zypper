@@ -59,6 +59,16 @@ options:
         default: "no"
         choices: [ "yes", "no" ]
         aliases: []
+    package_type:
+        description:
+          - C(package) an ordinary RPM package.
+            C(patch)  update of one or more packages. A patch can include special scripts and messages to be run or shown during installation of the update
+            C(pattern) group of packages required or recommended to install some functionality.
+            C(product) group of packages which are necessary to install a product.
+            C(srcpackage) source code package (.src.rpm). This type works in search and install commands.
+        required: false
+        choices: [ 'package', 'patch', 'pattern', 'product', 'srcpackage' ]
+        default: "package"
 
 notes: []
 # informational: requirements for nodes
@@ -102,14 +112,19 @@ def get_package_state(m, name):
         return False
 
 # Function used to make sure a package is present.
-def package_present(m, name, installed_state, disable_gpg_check):
+def package_present(m, name, installed_state, disable_gpg_check,package_type):
     if installed_state is False:
         cmd = ['/usr/bin/zypper', '--non-interactive']
         # add global options before zypper command
         if disable_gpg_check:
             cmd.append('--no-gpg-check')
-
+            
         cmd.extend(['install', '--auto-agree-with-licenses'])
+        
+        if package_type:
+            cmd.append('-t')
+            cmd.append(package_type)
+            
         cmd.append(name)
         rc, stdout, stderr = m.run_command(cmd, check_rc=False)
 
@@ -126,10 +141,17 @@ def package_present(m, name, installed_state, disable_gpg_check):
     return (rc, stdout, stderr, changed)
 
 # Function used to make sure a package is the latest available version.
-def package_latest(m, name, installed_state, disable_gpg_check):
+def package_latest(m, name, installed_state, disable_gpg_check,package_type):
 
     if installed_state is True:
-        cmd = ['/usr/bin/zypper', '--non-interactive', 'update', '--auto-agree-with-licenses', name]
+        cmd = ['/usr/bin/zypper', '--non-interactive', 'update', '--auto-agree-with-licenses']
+        
+        if package_type:
+            cmd.append('-t')
+            cmd.append(package_type)
+            
+        cmd.append(name);
+        
         pre_upgrade_name = ''
         post_upgrade_name = ''
 
@@ -152,9 +174,15 @@ def package_latest(m, name, installed_state, disable_gpg_check):
         return package_present(m, name, installed_state, disable_gpg_check)
 
 # Function used to make sure a package is not installed.
-def package_absent(m, name, installed_state):
+def package_absent(m, name, installed_state,package_type):
     if installed_state is True:
-        cmd = ['/usr/bin/zypper', '--non-interactive', 'remove', name]
+        cmd = ['/usr/bin/zypper', '--non-interactive', 'remove']
+        if package_type:
+            cmd.append('-t')
+            cmd.append(package_type)
+            
+        cmd.append(name)
+        
         rc, stdout, stderr = m.run_command(cmd)
 
         if rc == 0:
@@ -178,6 +206,7 @@ def main():
             name = dict(required=True, aliases=['pkg']),
             state = dict(required=False, default='present', choices=['absent', 'installed', 'latest', 'present', 'removed']),
             disable_gpg_check = dict(required=False, default='no', type='bool'),
+            package_type = dict(required=False, default='package', choices=['package', 'patch', 'pattern', 'product', 'srcpackage']),
         ),
         supports_check_mode = False
     )
@@ -188,24 +217,26 @@ def main():
     name  = params['name']
     state = params['state']
     disable_gpg_check = params['disable_gpg_check']
-
+    package_type = params['package_type']
+    
     rc = 0
     stdout = ''
     stderr = ''
     result = {}
     result['name'] = name
     result['state'] = state
-
+    result['package_type'] = package_type 
+    
     # Get package state
     installed_state = get_package_state(module, name)
 
     # Perform requested action
     if state in ['installed', 'present']:
-        (rc, stdout, stderr, changed) = package_present(module, name, installed_state, disable_gpg_check)
+        (rc, stdout, stderr, changed) = package_present(module, name, installed_state, disable_gpg_check,package_type)
     elif state in ['absent', 'removed']:
-        (rc, stdout, stderr, changed) = package_absent(module, name, installed_state)
+        (rc, stdout, stderr, changed) = package_absent(module, name, installed_state,package_type)
     elif state == 'latest':
-        (rc, stdout, stderr, changed) = package_latest(module, name, installed_state, disable_gpg_check)
+        (rc, stdout, stderr, changed) = package_latest(module, name, installed_state, disable_gpg_check,package_type)
 
     if rc != 0:
         if stderr:
